@@ -1,0 +1,70 @@
+name: Obfuscate in cloud (без скачивания clang)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'Путь к .c файлу в репе'
+        required: false
+        default: 'input/test.c'
+      flags:
+        description: 'Флаги Hikari (без -mllvm, через пробел)'
+        required: false
+        default: '-enable-subobf -enable-cffobf'
+      output:
+        description: 'Имя выходного exe'
+        required: false
+        default: 'output.exe'
+  push:
+    paths:
+      - 'input/**'
+
+jobs:
+  obf:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download built Hikari
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: build-windows.yml
+          branch: main
+          name: Hikari-LLVM19-Windows-X64
+          path: ./dl
+          if_no_artifact_found: fail
+
+      - name: Unpack clang
+        shell: bash
+        run: |
+          ls -lh ./dl
+          7z x ./dl/Hikari-LLVM19-Windows-X64.zip -ohikari
+          ls ./hikari/install/bin | head -n 20
+          ./hikari/install/bin/clang.exe --version
+
+      - name: Obfuscate
+        shell: bash
+        run: |
+          SRC="${{ github.event.inputs.source }}"
+          if [ -z "$SRC" ]; then SRC="input/test.c"; fi
+          FLAGS="${{ github.event.inputs.flags }}"
+          if [ -z "$FLAGS" ]; then FLAGS="-enable-subobf -enable-cffobf"; fi
+          OUT="${{ github.event.inputs.output }}"
+          if [ -z "$OUT" ]; then OUT="output.exe"; fi
+          echo "SRC=$SRC FLAGS=$FLAGS OUT=$OUT"
+          ls -lh "$SRC"
+          EXTRA=""
+          for f in $FLAGS; do EXTRA="$EXTRA -mllvm $f"; done
+          echo "clang -mllvm -hikari $EXTRA -O2 -o $OUT $SRC"
+          ./hikari/install/bin/clang.exe -mllvm -hikari $EXTRA -O2 -o "$OUT" "$SRC"
+          ls -lh "$OUT"
+          echo "$OUT" > out_name.txt
+
+      - name: Upload obfuscated exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: obfuscated-exe
+          path: output.exe
+          if-no-files-found: error
