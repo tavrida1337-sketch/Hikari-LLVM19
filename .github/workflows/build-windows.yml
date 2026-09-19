@@ -1,0 +1,128 @@
+name: Build Hikari Windows (X64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'LLVM_TARGETS_TO_BUILD (X86 = быстрее, X86;ARM;AArch64 = как в релизе)'
+        required: false
+        default: 'X86'
+        type: string
+      build_type:
+        description: 'CMAKE_BUILD_TYPE'
+        required: false
+        default: 'Release'
+        type: choice
+        options:
+          - Release
+          - MinSizeRel
+  push:
+    paths:
+      - '.github/workflows/build-windows.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Show tools
+        shell: bash
+        run: |
+          cmake --version
+          ninja --version
+          echo "CPU:"
+          nproc || echo $NUMBER_OF_PROCESSORS
+
+      - name: Configure (Hikari flags from release)
+        shell: bash
+        run: |
+          mkdir -p build
+          cd build
+          cmake -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ inputs.build_type || 'Release' }} \
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded \
+            -DCMAKE_CXX_FLAGS="/MT" \
+            -DLLVM_ENABLE_PROJECTS="clang;lld" \
+            -DLLVM_TARGETS_TO_BUILD="${{ inputs.targets || 'X86' }}" \
+            -DLLVM_ENABLE_ZSTD=OFF \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_UTILS=OFF \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_BUILD_TOOLS=OFF \
+            -DLLVM_ENABLE_ASSERTIONS=OFF \
+            -DCMAKE_INSTALL_PREFIX="./install" \
+            ../llvm
+
+      - name: Build
+        shell: bash
+        run: |
+          cd build
+          # -j2 чтобы не упасть по RAM на линковке clang (на раннере 16GB)
+          ninja -j2
+
+      - name: Install
+        shell: bash
+        run: |
+          cd build
+          cmake --install . --prefix ./install
+          ls -lh ./install/bin | head -n 100
+          ./install/bin/clang --version || ./install/bin/clang.exe --version
+
+      - name: Test obfuscation flags
+        shell: bash
+        run: |
+          echo 'int foo(){return 42;} int main(){return foo();}' > test.c
+          ./build/install/bin/clang -mllvm -hikari -mllvm -enable-subobf -O2 -o test.exe test.c
+          ls -lh test.exe
+          echo "OK - Hikari works"
+
+      - name: Package zip
+        shell: bash
+        run: |
+          cd build
+          7z a ../Hikari-LLVM19-Windows-X64.zip ./install/*
+          ls -lh ../*.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hikari-LLVM19-Windows-X64
+          path: Hikari-LLVM19-Windows-X64.zip
+          compression-level: 0
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "## Готово! Как использовать" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Скачай artifact \`Hikari-LLVM19-Windows-X64\`, распакуй, там будет \`bin/clang.exe\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```bat' >> $GITHUB_STEP_SUMMARY
+          echo 'clang.exe -mllvm -hikari -mllvm -enable-cffobf -mllvm -enable-subobf -O2 -o output.exe source.c' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
