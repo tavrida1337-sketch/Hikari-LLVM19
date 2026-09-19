@@ -28,6 +28,8 @@ jobs:
   build-windows:
     runs-on: windows-2022
     timeout-minutes: 360
+    env:
+      MSYS2_ARG_CONV_EXCL: "*"
     steps:
       - name: Free disk space (Windows)
         shell: pwsh
