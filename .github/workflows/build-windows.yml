@@ -29,16 +29,16 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 360
     steps:
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
+      - name: Free disk space (Windows)
+        shell: pwsh
+        run: |
+          Get-PSDrive C, D | Select-Object Name, Used, Free
+          # Чистим самое жирное, но безопасное для сборки LLVM
+          Remove-Item -Recurse -Force "C:\Program Files\MongoDB" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Android" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$env:AGENT_TOOLSDIRECTORY\CodeQL" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files\dotnet" -ErrorAction SilentlyContinue
+          Get-PSDrive C, D | Select-Object Name, Used, Free
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,14 +61,19 @@ jobs:
       - name: Configure (Hikari flags from release)
         shell: bash
         run: |
+          TARGETS="${{ github.event.inputs.targets }}"
+          if [ -z "$TARGETS" ]; then TARGETS="X86"; fi
+          BUILD_TYPE="${{ github.event.inputs.build_type }}"
+          if [ -z "$BUILD_TYPE" ]; then BUILD_TYPE="Release"; fi
+          echo "TARGETS=$TARGETS BUILD_TYPE=$BUILD_TYPE"
           mkdir -p build
           cd build
           cmake -G Ninja \
-            -DCMAKE_BUILD_TYPE=${{ inputs.build_type || 'Release' }} \
+            -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
             -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded \
             -DCMAKE_CXX_FLAGS="/MT" \
             -DLLVM_ENABLE_PROJECTS="clang;lld" \
-            -DLLVM_TARGETS_TO_BUILD="${{ inputs.targets || 'X86' }}" \
+            -DLLVM_TARGETS_TO_BUILD="$TARGETS" \
             -DLLVM_ENABLE_ZSTD=OFF \
             -DLLVM_INCLUDE_TESTS=OFF \
             -DLLVM_INCLUDE_EXAMPLES=OFF \
